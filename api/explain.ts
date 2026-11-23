@@ -80,6 +80,33 @@ function extractJsonObject(rawText: string): Record<string, unknown> {
   return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>;
 }
 
+async function discoverFlashModels(apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      models?: Array<{
+        name?: string;
+        supportedGenerationMethods?: string[];
+      }>;
+    };
+    const all = (data.models ?? [])
+      .filter((m) => m.supportedGenerationMethods?.includes('generateContent') && m.name)
+      .map((m) => m.name!.replace(/^models\//, ''));
+
+    // Prefer fast flash models, newest first
+    const flashModels = all
+      .filter((name) => name.includes('flash') && !name.includes('image') && !name.includes('tts'))
+      .sort()
+      .reverse();
+    return flashModels.slice(0, 6);
+  } catch {
+    return [];
+  }
+}
+
 export default async function handler(req: VercelReq, res: VercelRes) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
@@ -108,50 +135,80 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
   const prompt = buildPrompt(body);
   const envModel = process.env.GEMINI_MODEL?.trim().replace(/^models\//, '');
-  const primaryModel = envModel && envModel.startsWith('gemini-') ? envModel : 'gemini-2.5-flash';
-  const candidateModels = Array.from(
-    new Set([primaryModel, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'])
+  const initialModels = Array.from(
+    new Set(
+      [
+        envModel && envModel.startsWith('gemini-') ? envModel : '',
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-flash',
+        'gemini-flash-latest',
+      ].filter(Boolean)
+    )
   );
 
   let text = '';
-  let usedModel = primaryModel;
+  let usedModel = initialModels[0];
   let lastError = '';
+  const tried = new Set<string>();
 
-  for (const model of candidateModels) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model
-    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  async function tryModels(models: string[]) {
+    for (const model of models) {
+      if (tried.has(model)) continue;
+      tried.add(model);
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: 'application/json',
-          },
-        }),
-      });
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model
+      )}:generateContent?key=${encodeURIComponent(apiKey!)}`;
 
-      if (response.ok) {
-        const data = (await response.json()) as {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        };
-        text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-        usedModel = model;
-        if (text) break;
-      } else {
-        const errBody = await response.text();
-        lastError = `Gemini API (${response.status} on ${model}): ${errBody.slice(0, 180)}`;
-        if (![404, 429, 500, 503].includes(response.status)) {
-          return res.status(response.status).json({ error: lastError });
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: 'application/json',
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data = (await response.json()) as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          };
+          text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          usedModel = model;
+          if (text) return true;
+        } else {
+          const errBody = await response.text();
+          lastError = `Gemini API (${response.status} on ${model}): ${errBody.slice(0, 180)}`;
+          if (![404, 429, 500, 503].includes(response.status)) {
+            throw new Error(lastError);
+          }
         }
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('Gemini API (')) {
+          throw err;
+        }
+        lastError = err instanceof Error ? err.message : String(err);
       }
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
     }
+    return false;
+  }
+
+  try {
+    const ok = await tryModels(initialModels);
+    if (!ok) {
+      const discovered = await discoverFlashModels(apiKey);
+      if (discovered.length > 0) {
+        await tryModels(discovered);
+      }
+    }
+  } catch (err) {
+    return res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   if (!text) {
