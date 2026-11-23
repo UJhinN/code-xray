@@ -381,6 +381,53 @@ textarea {
   color: #fff;
 }
 
+/* Syntax Highlighting (VS Code Dark+ inspired) */
+.syn-keyword {
+  color: #f472b6;
+  font-weight: 500;
+}
+
+.syn-string {
+  color: #86efac;
+}
+
+.syn-number {
+  color: #fbbf24;
+}
+
+.syn-comment {
+  color: #64748b;
+  font-style: italic;
+}
+
+.syn-type {
+  color: #2dd4bf;
+}
+
+/* Dark theme for React Flow Controls */
+.react-flow__controls {
+  background: var(--bg-panel) !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: 10px !important;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+.react-flow__controls-button {
+  background: var(--bg-panel) !important;
+  color: var(--text-primary) !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  fill: var(--text-primary) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--bg-card-hover) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: var(--text-primary) !important;
+}
+
 /* Badges */
 .badge {
   display: inline-flex;

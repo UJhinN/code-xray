@@ -22,6 +22,24 @@ const EVENT_LABEL: Record<VariableEventType, string> = {
   read: 'นำไปใช้',
 };
 
+const CODE_KEYWORDS = new Set([
+  // JS / TS
+  'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue',
+  'default', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally',
+  'for', 'from', 'function', 'if', 'implements', 'import', 'in', 'instanceof',
+  'interface', 'let', 'new', 'null', 'of', 'private', 'protected', 'public',
+  'readonly', 'return', 'static', 'super', 'switch', 'this', 'throw', 'true',
+  'try', 'type', 'typeof', 'undefined', 'var', 'void', 'while', 'yield',
+  // Python
+  'and', 'as', 'assert', 'def', 'del', 'elif', 'except', 'False', 'global',
+  'is', 'lambda', 'None', 'nonlocal', 'not', 'or', 'pass', 'raise', 'True', 'with',
+]);
+
+const CODE_TYPES = new Set([
+  'string', 'number', 'boolean', 'any', 'unknown', 'never', 'Promise', 'Array',
+  'Record', 'Error', 'int', 'float', 'str', 'bool', 'list', 'dict', 'set', 'tuple',
+]);
+
 export const CodePane: React.FC<CodePaneProps> = ({
   code,
   onChangeCode,
@@ -106,19 +124,73 @@ export const CodePane: React.FC<CodePaneProps> = ({
 
   function renderInteractiveLine(lineText: string, lineNumber: number) {
     if (!lineText) return ' ';
-    const tokens = lineText.split(/(\b[A-Za-z_]\w*\b)/g);
 
-    return tokens.map((tok, idx) => {
-      if (!/^[A-Za-z_]\w*$/.test(tok)) {
-        return <React.Fragment key={idx}>{tok}</React.Fragment>;
+    // Tokenize comments, strings, numbers, identifiers, and other characters
+    const tokenRegex =
+      /(\/\/.*$|#.*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b)/g;
+
+    const nodes: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let keyIdx = 0;
+
+    while ((match = tokenRegex.exec(lineText)) !== null) {
+      if (match.index > lastIndex) {
+        nodes.push(
+          <React.Fragment key={keyIdx++}>{lineText.slice(lastIndex, match.index)}</React.Fragment>
+        );
       }
 
+      const tok = match[0];
+      lastIndex = match.index + tok.length;
+
+      // Comments
+      if (tok.startsWith('//') || tok.startsWith('#')) {
+        nodes.push(
+          <span key={keyIdx++} className="syn-comment">
+            {tok}
+          </span>
+        );
+        continue;
+      }
+
+      // Strings & template literals
+      if (tok.startsWith('"') || tok.startsWith("'") || tok.startsWith('`')) {
+        nodes.push(
+          <span key={keyIdx++} className="syn-string">
+            {tok}
+          </span>
+        );
+        continue;
+      }
+
+      // Numbers
+      if (/^\d/.test(tok)) {
+        nodes.push(
+          <span key={keyIdx++} className="syn-number">
+            {tok}
+          </span>
+        );
+        continue;
+      }
+
+      // Keywords
+      if (CODE_KEYWORDS.has(tok)) {
+        nodes.push(
+          <span key={keyIdx++} className="syn-keyword">
+            {tok}
+          </span>
+        );
+        continue;
+      }
+
+      // Clickable function
       const fnId = fnNameToId.get(tok);
       if (fnId) {
         const isSel = fnId === selectedFunctionId;
-        return (
+        nodes.push(
           <span
-            key={idx}
+            key={keyIdx++}
             className={`token-clickable token-fn ${isSel ? 'selected' : ''}`}
             title={`คลิกเพื่อดูฟังก์ชัน ${tok}`}
             onClick={() => onSelectFunction(fnId)}
@@ -126,19 +198,20 @@ export const CodePane: React.FC<CodePaneProps> = ({
             {tok}
           </span>
         );
+        continue;
       }
 
+      // Clickable variable
       const varList = varNameToCandidates.get(tok);
       if (varList && varList.length > 0) {
-        // Pick the variable that has an event on this line, or closest declaredLine <= lineNumber
         const best =
           varList.find((v) => v.events.some((ev) => ev.line === lineNumber)) ??
           varList.find((v) => v.declaredLine <= lineNumber) ??
           varList[0];
         const isSel = best.id === selectedVariableId;
-        return (
+        nodes.push(
           <span
-            key={idx}
+            key={keyIdx++}
             className={`token-clickable token-var ${isSel ? 'selected' : ''}`}
             title={`คลิกเพื่อตามรอยตัวแปร ${tok} (${best.inferredType})`}
             onClick={() => onSelectVariable(best.id)}
@@ -146,10 +219,27 @@ export const CodePane: React.FC<CodePaneProps> = ({
             {tok}
           </span>
         );
+        continue;
       }
 
-      return <React.Fragment key={idx}>{tok}</React.Fragment>;
-    });
+      // Built-in types
+      if (CODE_TYPES.has(tok)) {
+        nodes.push(
+          <span key={keyIdx++} className="syn-type">
+            {tok}
+          </span>
+        );
+        continue;
+      }
+
+      nodes.push(<React.Fragment key={keyIdx++}>{tok}</React.Fragment>);
+    }
+
+    if (lastIndex < lineText.length) {
+      nodes.push(<React.Fragment key={keyIdx++}>{lineText.slice(lastIndex)}</React.Fragment>);
+    }
+
+    return nodes;
   }
 
   return (
