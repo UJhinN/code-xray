@@ -103,11 +103,21 @@ async function discoverFlashModels(apiKey: string): Promise<string[]> {
 export default async function handler(req: VercelReq, res: VercelRes) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+
+  if (req.method === 'GET') {
+    const models = apiKey ? await discoverFlashModels(apiKey) : [];
+    return res.status(200).json({
+      ok: Boolean(apiKey),
+      hasKey: Boolean(apiKey),
+      availableFlashModels: models,
+    });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     return res.status(500).json({
       error:
@@ -157,12 +167,12 @@ export default async function handler(req: VercelReq, res: VercelRes) {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(18000),
+          signal: AbortSignal.timeout(25000),
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
               temperature: 0.2,
-              maxOutputTokens: 2048,
+              maxOutputTokens: 8192,
               responseMimeType: 'application/json',
             },
           }),
@@ -170,9 +180,17 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
         if (response.ok) {
           const data = (await response.json()) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+            candidates?: Array<{
+              content?: {
+                parts?: Array<{ text?: string; thought?: boolean }>;
+              };
+            }>;
           };
-          text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+          const parts = data.candidates?.[0]?.content?.parts ?? [];
+          const answerPart =
+            parts.find((p) => !p.thought && typeof p.text === 'string' && p.text.trim()) ??
+            parts[parts.length - 1];
+          text = answerPart?.text ?? '';
           usedModel = model;
           if (text) return true;
         } else {
