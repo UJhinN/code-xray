@@ -113,29 +113,46 @@ export async function generateAIExplanation(
   let text = '';
 
   if (config.provider === 'gemini') {
-    const model = config.model.trim() || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(config.apiKey.trim())}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
+    const rawModel = config.model.trim().replace(/^models\//, '');
+    const primaryModel = rawModel.startsWith('gemini-') ? rawModel : 'gemini-2.5-flash';
+    const candidateModels = Array.from(
+      new Set([primaryModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'])
+    );
 
-    if (!res.ok) {
+    let lastErr = '';
+    for (const model of candidateModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(config.apiKey.trim())}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        };
+        text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+        break;
+      }
+
       const errBody = await res.text();
-      throw new Error(`Gemini API Error (${res.status}): ${errBody.slice(0, 180)}`);
+      lastErr = `Gemini API Error (${res.status}): ${errBody.slice(0, 180)}`;
+      // Retry next model only if 404 (model not found)
+      if (res.status !== 404) {
+        throw new Error(lastErr);
+      }
     }
 
-    const data = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-    text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (!text) {
+      throw new Error(lastErr || 'ไม่สามารถเชื่อมต่อ Gemini API ได้');
+    }
   } else {
     const model = config.model.trim() || 'gpt-4o-mini';
     const res = await fetch('https://api.openai.com/v1/chat/completions', {

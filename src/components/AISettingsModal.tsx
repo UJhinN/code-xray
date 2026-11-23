@@ -8,21 +8,43 @@ interface AISettingsModalProps {
   onClose: () => void;
 }
 
+const GEMINI_MODELS = [
+  { id: 'gemini-2.5-flash', label: 'gemini-2.5-flash (แนะนำ — ฉลาดและเร็ว)' },
+  { id: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite (เบาและประหยัดโควต้า)' },
+  { id: 'gemini-2.0-flash', label: 'gemini-2.0-flash (รุ่นสำรอง)' },
+];
+
+const OPENAI_MODELS = [
+  { id: 'gpt-4o-mini', label: 'gpt-4o-mini (แนะนำ)' },
+  { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
+];
+
+function normalizeModelForProvider(provider: 'gemini' | 'openai', currentModel: string): string {
+  const list = provider === 'gemini' ? GEMINI_MODELS : OPENAI_MODELS;
+  return list.some((m) => m.id === currentModel) ? currentModel : list[0].id;
+}
+
 export const AISettingsModal: React.FC<AISettingsModalProps> = ({ config, onSave, onClose }) => {
   const [provider, setProvider] = useState<'gemini' | 'openai'>(config.provider);
   const [apiKey, setApiKey] = useState(config.apiKey);
-  const [model, setModel] = useState(config.model);
+  const [model, setModel] = useState(() => normalizeModelForProvider(config.provider, config.model));
 
   function handleProviderChange(nextProvider: 'gemini' | 'openai') {
     setProvider(nextProvider);
-    setModel(nextProvider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini');
+    setModel(nextProvider === 'gemini' ? GEMINI_MODELS[0].id : OPENAI_MODELS[0].id);
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSave({ provider, apiKey: apiKey.trim(), model: model.trim() });
+    onSave({
+      provider,
+      apiKey: apiKey.trim(),
+      model: normalizeModelForProvider(provider, model.trim()),
+    });
     onClose();
   }
+
+  const availableModels = provider === 'gemini' ? GEMINI_MODELS : OPENAI_MODELS;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -56,12 +78,13 @@ export const AISettingsModal: React.FC<AISettingsModalProps> = ({ config, onSave
 
           <div className="field">
             <label>ชื่อโมเดล</label>
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder={provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'}
-            />
+            <select value={model} onChange={(e) => setModel(e.target.value)}>
+              {availableModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="field">
