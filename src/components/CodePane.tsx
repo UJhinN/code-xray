@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Code2, Eye, Upload } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, ClipboardPaste, Code2, Copy, Eye, Sparkles, Trash2, Upload } from 'lucide-react';
 import type { AnalysisResult, FunctionInfo, VariableEventType, VariableInfo } from '../core/types';
 
 interface CodePaneProps {
@@ -54,6 +54,11 @@ export const CodePane: React.FC<CodePaneProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const backdropRef = useRef<HTMLPreElement | null>(null);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [pasted, setPasted] = useState(false);
 
   const lines = useMemo(() => code.split(/\r?\n/), [code]);
 
@@ -242,6 +247,100 @@ export const CodePane: React.FC<CodePaneProps> = ({
     return nodes;
   }
 
+  function handleEditorScroll() {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    if (backdropRef.current) {
+      backdropRef.current.scrollTop = ta.scrollTop;
+      backdropRef.current.scrollLeft = ta.scrollLeft;
+    }
+    if (gutterRef.current) {
+      gutterRef.current.scrollTop = ta.scrollTop;
+    }
+  }
+
+  function handleEditorKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const next = code.slice(0, start) + '  ' + code.slice(end);
+      onChangeCode(next);
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 2;
+      });
+    }
+  }
+
+  async function handlePasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        onChangeCode(text);
+        setPasted(true);
+        setTimeout(() => setPasted(false), 1800);
+      }
+    } catch {
+      textareaRef.current?.focus();
+    }
+  }
+
+  async function handleCopyCode() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // ignore clipboard errors
+    }
+  }
+
+  function renderHighlightedStaticLine(lineText: string) {
+    if (!lineText) return ' ';
+    const tokenRegex =
+      /(\/\/.*$|#.*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b)/g;
+
+    const nodes: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let keyIdx = 0;
+
+    while ((match = tokenRegex.exec(lineText)) !== null) {
+      if (match.index > lastIndex) {
+        nodes.push(
+          <React.Fragment key={keyIdx++}>{lineText.slice(lastIndex, match.index)}</React.Fragment>
+        );
+      }
+      const tok = match[0];
+      lastIndex = match.index + tok.length;
+
+      if (tok.startsWith('//') || tok.startsWith('#')) {
+        nodes.push(<span key={keyIdx++} className="syn-comment">{tok}</span>);
+      } else if (tok.startsWith('"') || tok.startsWith("'") || tok.startsWith('`')) {
+        nodes.push(<span key={keyIdx++} className="syn-string">{tok}</span>);
+      } else if (/^\d/.test(tok)) {
+        nodes.push(<span key={keyIdx++} className="syn-number">{tok}</span>);
+      } else if (CODE_KEYWORDS.has(tok)) {
+        nodes.push(<span key={keyIdx++} className="syn-keyword">{tok}</span>);
+      } else if (fnNameToId.has(tok)) {
+        nodes.push(<span key={keyIdx++} style={{ color: '#c4b5fd' }}>{tok}</span>);
+      } else if (varNameToCandidates.has(tok)) {
+        nodes.push(<span key={keyIdx++} style={{ color: '#7dd3fc' }}>{tok}</span>);
+      } else if (CODE_TYPES.has(tok)) {
+        nodes.push(<span key={keyIdx++} className="syn-type">{tok}</span>);
+      } else {
+        nodes.push(<React.Fragment key={keyIdx++}>{tok}</React.Fragment>);
+      }
+    }
+
+    if (lastIndex < lineText.length) {
+      nodes.push(<React.Fragment key={keyIdx++}>{lineText.slice(lastIndex)}</React.Fragment>);
+    }
+
+    return nodes;
+  }
+
   return (
     <div className="pane pane-left">
       <div className="pane-header">
@@ -300,13 +399,81 @@ export const CodePane: React.FC<CodePaneProps> = ({
       </div>
 
       {isEditMode ? (
-        <textarea
-          className="code-textarea"
-          value={code}
-          onChange={(e) => onChangeCode(e.target.value)}
-          spellCheck={false}
-          placeholder="วางโค้ด JavaScript, TypeScript หรือ Python ที่นี่..."
-        />
+        <>
+          <div className="editor-toolbar">
+            <div className="editor-toolbar-group">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handlePasteFromClipboard}
+                title="วางโค้ดจากคลิปบอร์ดทันที"
+              >
+                {pasted ? <Check size={13} color="#6ee7b7" /> : <ClipboardPaste size={13} />}
+                {pasted ? 'วางโค้ดแล้ว' : 'วางจากคลิปบอร์ด'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleCopyCode}
+                title="คัดลอกโค้ดทั้งหมด"
+              >
+                {copied ? <Check size={13} color="#6ee7b7" /> : <Copy size={13} />}
+                {copied ? 'คัดลอกแล้ว' : 'คัดลอก'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={() => {
+                  onChangeCode('');
+                  textareaRef.current?.focus();
+                }}
+                title="ล้างโค้ดทั้งหมด"
+              >
+                <Trash2 size={13} />
+                ล้างโค้ด
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => onToggleEditMode(false)}
+              title="สลับไปโหมดคลิกดูฟังก์ชันและตัวแปร"
+            >
+              <Sparkles size={13} />
+              เริ่มสแกน X-Ray
+            </button>
+          </div>
+
+          <div className="editor-shell">
+            <div ref={gutterRef} className="editor-gutter" aria-hidden="true">
+              {lines.map((_, idx) => (
+                <div key={idx}>{idx + 1}</div>
+              ))}
+            </div>
+
+            <div className="editor-stage">
+              <pre ref={backdropRef} className="editor-backdrop" aria-hidden="true">
+                {lines.map((lineText, idx) => (
+                  <div key={idx}>{renderHighlightedStaticLine(lineText)}</div>
+                ))}
+              </pre>
+              <textarea
+                ref={textareaRef}
+                className="editor-input"
+                value={code}
+                onChange={(e) => onChangeCode(e.target.value)}
+                onScroll={handleEditorScroll}
+                onKeyDown={handleEditorKeyDown}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoComplete="off"
+                autoCorrect="off"
+                placeholder="วางโค้ด JavaScript, TypeScript หรือ Python ที่นี่..."
+              />
+            </div>
+          </div>
+        </>
       ) : (
         <div className="code-scroll">
           {lines.map((lineText, idx) => {
