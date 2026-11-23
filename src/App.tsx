@@ -6,17 +6,11 @@ import {
   Loader2,
   Network,
   ScanEye,
-  Settings,
   Sparkles,
   User,
 } from 'lucide-react';
 import { analyzeCode } from './core/analyze';
-import {
-  generateAIExplanation,
-  loadAIConfig,
-  saveAIConfig,
-  type AIConfig,
-} from './core/aiExplainer';
+import { generateAIExplanation } from './core/aiExplainer';
 import { CODE_SAMPLES } from './core/samples';
 import type { AIExplanation, AudienceMode, SupportedLanguage } from './core/types';
 import { CodePane } from './components/CodePane';
@@ -24,7 +18,6 @@ import { FlowMap } from './components/FlowMap';
 import { FolderExplorer, type ProjectFile } from './components/FolderExplorer';
 import { PlainStoryPanel } from './components/PlainStoryPanel';
 import { VariableTrackerPanel } from './components/VariableTrackerPanel';
-import { AISettingsModal } from './components/AISettingsModal';
 
 type RightTab = 'flow' | 'story' | 'variables';
 
@@ -45,8 +38,6 @@ export function App() {
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
 
-  const [aiConfig, setAiConfig] = useState<AIConfig>(() => loadAIConfig());
-  const [showAISettings, setShowAISettings] = useState<boolean>(false);
   const [aiExplanation, setAiExplanation] = useState<AIExplanation | null>(null);
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -141,20 +132,11 @@ export function App() {
     setFocusedLine(line);
   }
 
-  function handleSaveAIConfig(next: AIConfig) {
-    setAiConfig(next);
-    saveAIConfig(next);
-  }
-
   async function handleRunAIExplain() {
-    if (!aiConfig.apiKey.trim()) {
-      setShowAISettings(true);
-      return;
-    }
     setAiLoading(true);
     setAiError(null);
     try {
-      const result = await generateAIExplanation(code, analysis, aiConfig);
+      const result = await generateAIExplanation(code, analysis);
       setAiExplanation(result);
     } catch (err) {
       setAiError(err instanceof Error ? err.message : String(err));
@@ -235,15 +217,6 @@ export function App() {
           >
             {aiLoading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
             {aiLoading ? 'กำลังให้ AI วิเคราะห์...' : 'AI อธิบายเชิงลึก'}
-          </button>
-
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setShowAISettings(true)}
-            title="ตั้งค่า API Key"
-          >
-            <Settings size={14} />
           </button>
         </div>
       </header>
@@ -352,14 +325,6 @@ export function App() {
           </div>
         </section>
       </main>
-
-      {showAISettings && (
-        <AISettingsModal
-          config={aiConfig}
-          onSave={handleSaveAIConfig}
-          onClose={() => setShowAISettings(false)}
-        />
-      )}
     </div>
   );
 }
