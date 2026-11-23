@@ -116,7 +116,7 @@ export async function generateAIExplanation(
     const rawModel = config.model.trim().replace(/^models\//, '');
     const primaryModel = rawModel.startsWith('gemini-') ? rawModel : 'gemini-2.5-flash';
     const candidateModels = Array.from(
-      new Set([primaryModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'])
+      new Set([primaryModel, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'])
     );
 
     let lastErr = '';
@@ -143,9 +143,9 @@ export async function generateAIExplanation(
       }
 
       const errBody = await res.text();
-      lastErr = `Gemini API Error (${res.status}): ${errBody.slice(0, 180)}`;
-      // Retry next model only if 404 (model not found)
-      if (res.status !== 404) {
+      lastErr = `Gemini API Error (${res.status} on ${model}): ${errBody.slice(0, 180)}`;
+      // Automatically fall back to the next Gemini model on 404, 429 (quota), 500, or 503 (high demand)
+      if (![404, 429, 500, 503].includes(res.status)) {
         throw new Error(lastErr);
       }
     }
