@@ -33,9 +33,12 @@ export async function generateAIExplanation(
     | null;
 
   if (!res.ok) {
+    if (res.status === 504) {
+      throw new Error('AI ใช้เวลาประมวลผลนานเกินกำหนด (504 Timeout) กรุณาลองกดอีกครั้ง');
+    }
     throw new Error(
       data?.error ||
-        `ไม่สามารถเรียกใช้งาน /api/explain ได้ (${res.status}) — หากกำลังรันแบบ Local ให้ Deploy บน Vercel และตั้งค่า GEMINI_API_KEY`
+        `ไม่สามารถเรียกใช้งาน /api/explain ได้ (${res.status})`
     );
   }
 

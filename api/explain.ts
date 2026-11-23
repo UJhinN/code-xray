@@ -28,38 +28,31 @@ interface VercelRes {
 }
 
 function buildPrompt(body: ExplainRequestBody): string {
-  const code = (body.code ?? '').slice(0, 24000);
+  const code = (body.code ?? '').slice(0, 14000);
   const language = body.language ?? 'javascript';
-  const funcList = (body.functions ?? []).slice(0, 40);
-  const varList = (body.variables ?? []).slice(0, 35);
+  const funcList = (body.functions ?? []).slice(0, 25);
+  const varList = (body.variables ?? []).slice(0, 25);
 
-  return `คุณคือผู้ช่วยอธิบายโค้ดให้ทั้ง "คนทั่วไปที่ไม่ใช่โปรแกรมเมอร์" และ "นักพัฒนาที่ต้องการตรวจโค้ดที่ AI เจนมา" เข้าใจได้ง่ายที่สุดเป็นภาษาไทย
-
-กรุณาวิเคราะห์โค้ดต่อไปนี้และตอบกลับเป็น JSON เท่านั้น (ห้ามมีข้อความอื่นนอก JSON) ตามโครงสร้างนี้:
+  return `อธิบายโค้ดนี้เป็นภาษาไทยให้คนทั่วไปและนักพัฒนาเข้าใจง่าย ตอบเป็น JSON เท่านั้น:
 {
-  "overviewTh": "สรุปภาพรวมของโค้ดทั้งไฟล์เป็นภาษาคนธรรมดา 2-3 ประโยค",
+  "overviewTh": "สรุปภาพรวม 2 ประโยค",
   "functions": {
     "<function_id>": {
-      "plainTitleTh": "ชื่อหน้าที่สั้นๆ ภาษาไทย (3-6 คำ)",
-      "plainSummaryTh": "อธิบายการทำงานของฟังก์ชันนี้แบบภาษาคน 1-2 ประโยค",
+      "plainTitleTh": "ชื่อหน้าที่สั้นๆ 3-6 คำ",
+      "plainSummaryTh": "อธิบายสั้นๆ 1-2 ประโยค",
       "stepByStepTh": ["ขั้นที่ 1 ...", "ขั้นที่ 2 ..."],
-      "riskNoteTh": "ข้อควรระวังหรือ edge case ที่ควรเช็ก (ถ้าไม่มีให้ใส่ข้อความว่าง)"
+      "riskNoteTh": "จุดเสี่ยงหรือ edge case สั้นๆ (ถ้าไม่มีใส่ค่าว่าง)"
     }
   },
   "variables": {
     "<variable_id>": {
-      "roleTh": "อธิบายสั้นๆ ว่าตัวแปรนี้เก็บอะไรและสำคัญยังไง (1 ประโยค)"
+      "roleTh": "หน้าที่ตัวแปร 1 ประโยคสั้นๆ"
     }
   }
 }
-
-รายการฟังก์ชัน (ใช้ id ให้ตรง):
-${JSON.stringify(funcList)}
-
-รายการตัวแปร (ใช้ id ให้ตรง):
-${JSON.stringify(varList)}
-
-โค้ดต้นฉบับ (${language}):
+ฟังก์ชัน: ${JSON.stringify(funcList)}
+ตัวแปร: ${JSON.stringify(varList)}
+โค้ด (${language}):
 \`\`\`${language}
 ${code}
 \`\`\``;
@@ -139,9 +132,9 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     new Set(
       [
         envModel && envModel.startsWith('gemini-') ? envModel : '',
+        'gemini-3.8-flash',
         'gemini-2.5-flash-lite',
         'gemini-2.5-flash',
-        'gemini-flash-latest',
       ].filter(Boolean)
     )
   );
@@ -164,10 +157,12 @@ export default async function handler(req: VercelReq, res: VercelRes) {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
               temperature: 0.2,
+              maxOutputTokens: 2048,
               responseMimeType: 'application/json',
             },
           }),
