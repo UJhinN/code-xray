@@ -21,6 +21,7 @@ import { CODE_SAMPLES } from './core/samples';
 import type { AIExplanation, AudienceMode, SupportedLanguage } from './core/types';
 import { CodePane } from './components/CodePane';
 import { FlowMap } from './components/FlowMap';
+import { FolderExplorer, type ProjectFile } from './components/FolderExplorer';
 import { PlainStoryPanel } from './components/PlainStoryPanel';
 import { VariableTrackerPanel } from './components/VariableTrackerPanel';
 import { AISettingsModal } from './components/AISettingsModal';
@@ -38,6 +39,12 @@ export function App() {
   const [selectedVariableId, setSelectedVariableId] = useState<string | null>(null);
   const [focusedLine, setFocusedLine] = useState<number | null>(null);
 
+  // Folder upload state
+  const [folderName, setFolderName] = useState<string | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
+
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => loadAIConfig());
   const [showAISettings, setShowAISettings] = useState<boolean>(false);
   const [aiExplanation, setAiExplanation] = useState<AIExplanation | null>(null);
@@ -53,11 +60,60 @@ export function App() {
     setSelectedFunctionId(null);
     setSelectedVariableId(null);
     setFocusedLine(null);
+
+    if (activeFilePath) {
+      setProjectFiles((prev) =>
+        prev.map((f) =>
+          f.path === activeFilePath
+            ? { ...f, content: nextCode, lines: nextCode.split(/\r?\n/).length }
+            : f
+        )
+      );
+    }
+  }
+
+  function handleFolderLoaded(name: string, files: ProjectFile[], skipped: number) {
+    if (files.length === 0) {
+      setAiError('ไม่พบไฟล์โค้ดที่รองรับ (.js, .jsx, .ts, .tsx, .py) ในโฟลเดอร์นี้');
+      return;
+    }
+    setFolderName(name);
+    setProjectFiles(files);
+    setSkippedFilesCount(skipped);
+    setActiveFilePath(files[0].path);
+    setLanguage(files[0].language);
+    setCode(files[0].content);
+    setAiExplanation(null);
+    setAiError(null);
+    setSelectedFunctionId(null);
+    setSelectedVariableId(null);
+    setFocusedLine(null);
+  }
+
+  function handleSelectProjectFile(path: string) {
+    const target = projectFiles.find((f) => f.path === path);
+    if (!target) return;
+    setActiveFilePath(target.path);
+    setLanguage(target.language);
+    setCode(target.content);
+    setAiExplanation(null);
+    setAiError(null);
+    setSelectedFunctionId(null);
+    setSelectedVariableId(null);
+    setFocusedLine(null);
+  }
+
+  function handleCloseFolder() {
+    setFolderName(null);
+    setProjectFiles([]);
+    setActiveFilePath(null);
+    setSkippedFilesCount(0);
   }
 
   function handleSampleChange(sampleId: string) {
     const sample = CODE_SAMPLES.find((s) => s.id === sampleId);
     if (!sample) return;
+    handleCloseFolder();
     setLanguage('auto');
     handleCodeChange(sample.code);
     setIsEditMode(false);
@@ -208,10 +264,23 @@ export function App() {
       )}
 
       {/* Split Workspace */}
-      <main className="workspace">
+      <main className={`workspace ${folderName ? 'with-folder' : ''}`}>
+        {folderName && (
+          <FolderExplorer
+            folderName={folderName}
+            files={projectFiles}
+            activeFilePath={activeFilePath}
+            skippedCount={skippedFilesCount}
+            onSelectFile={handleSelectProjectFile}
+            onCloseFolder={handleCloseFolder}
+          />
+        )}
+
         <CodePane
           code={code}
           onChangeCode={handleCodeChange}
+          onFolderLoaded={handleFolderLoaded}
+          activeFilePath={activeFilePath}
           analysis={analysis}
           isEditMode={isEditMode}
           onToggleEditMode={setIsEditMode}

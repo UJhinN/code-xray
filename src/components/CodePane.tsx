@@ -1,10 +1,29 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ClipboardPaste, Code2, Copy, Eye, Sparkles, Trash2, Upload } from 'lucide-react';
-import type { AnalysisResult, FunctionInfo, VariableEventType, VariableInfo } from '../core/types';
+import {
+  Check,
+  ClipboardPaste,
+  Code2,
+  Copy,
+  Eye,
+  FolderUp,
+  Sparkles,
+  Trash2,
+  Upload,
+} from 'lucide-react';
+import type {
+  AnalysisResult,
+  FunctionInfo,
+  SupportedLanguage,
+  VariableEventType,
+  VariableInfo,
+} from '../core/types';
+import type { ProjectFile } from './FolderExplorer';
 
 interface CodePaneProps {
   code: string;
   onChangeCode: (next: string) => void;
+  onFolderLoaded: (folderName: string, files: ProjectFile[], skippedCount: number) => void;
+  activeFilePath: string | null;
   analysis: AnalysisResult;
   isEditMode: boolean;
   onToggleEditMode: (edit: boolean) => void;
@@ -40,9 +59,40 @@ const CODE_TYPES = new Set([
   'Record', 'Error', 'int', 'float', 'str', 'bool', 'list', 'dict', 'set', 'tuple',
 ]);
 
+const IGNORED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  '.vercel',
+  '__pycache__',
+  '.venv',
+  'venv',
+  'coverage',
+  '.cache',
+]);
+
+function detectLangFromFilename(filename: string): SupportedLanguage | null {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.mts')) {
+    return 'typescript';
+  }
+  if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) {
+    return 'javascript';
+  }
+  if (lower.endsWith('.py')) {
+    return 'python';
+  }
+  return null;
+}
+
 export const CodePane: React.FC<CodePaneProps> = ({
   code,
   onChangeCode,
+  onFolderLoaded,
+  activeFilePath,
   analysis,
   isEditMode,
   onToggleEditMode,
@@ -53,6 +103,7 @@ export const CodePane: React.FC<CodePaneProps> = ({
   onSelectVariable,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
   const lineRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const backdropRef = useRef<HTMLPreElement | null>(null);
@@ -124,6 +175,57 @@ export const CodePane: React.FC<CodePaneProps> = ({
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  async function handleFolderUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    const allFiles = Array.from(fileList);
+    const firstRel = (allFiles[0] as File & { webkitRelativePath?: string }).webkitRelativePath || '';
+    const rootFolderName = firstRel.split('/')[0] || 'Uploaded Folder';
+
+    const loaded: ProjectFile[] = [];
+    let skipped = 0;
+
+    for (const file of allFiles) {
+      const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      const segments = relPath.split('/');
+
+      // Skip ignored directories (node_modules, .git, dist, etc.)
+      if (segments.some((seg) => IGNORED_DIRS.has(seg))) {
+        skipped++;
+        continue;
+      }
+
+      // Skip unsupported extensions or files > 400KB
+      const lang = detectLangFromFilename(file.name);
+      if (!lang || file.size > 400_000) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        const content = await file.text();
+        const withoutRoot = segments.length > 1 ? segments.slice(1) : segments;
+        const dir = withoutRoot.length > 1 ? withoutRoot.slice(0, -1).join('/') : '';
+        loaded.push({
+          path: withoutRoot.join('/'),
+          name: file.name,
+          dir,
+          content,
+          language: lang,
+          lines: content.split(/\r?\n/).length,
+        });
+      } catch {
+        skipped++;
+      }
+    }
+
+    loaded.sort((a, b) => a.path.localeCompare(b.path));
+    onFolderLoaded(rootFolderName, loaded, skipped);
+    onToggleEditMode(false);
     e.target.value = '';
   }
 
@@ -365,27 +467,51 @@ export const CodePane: React.FC<CodePaneProps> = ({
           </div>
         </div>
 
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".js,.jsx,.ts,.tsx,.py,.txt"
+            accept=".js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.txt"
             style={{ display: 'none' }}
             onChange={handleFileUpload}
+          />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            // @ts-expect-error webkitdirectory is supported in Chromium/Firefox/Safari
+            webkitdirectory=""
+            directory=""
+            style={{ display: 'none' }}
+            onChange={handleFolderUpload}
           />
           <button
             type="button"
             className="btn"
             onClick={() => fileInputRef.current?.click()}
-            title="อัปโหลดไฟล์ .js, .ts, .tsx, .py"
+            title="อัปโหลดไฟล์โค้ด 1 ไฟล์ (.js, .ts, .tsx, .py)"
           >
             <Upload size={14} />
-            อัปโหลดไฟล์
+            ไฟล์
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => folderInputRef.current?.click()}
+            title="อัปโหลดทั้งโฟลเดอร์โปรเจกต์ (ข้าม node_modules/.git อัตโนมัติ)"
+          >
+            <FolderUp size={14} />
+            ทั้งโฟลเดอร์
           </button>
         </div>
       </div>
 
       <div className="stats-strip">
+        {activeFilePath && (
+          <span className="stat-chip mono" style={{ color: '#a5b4fc' }} title={activeFilePath}>
+            {activeFilePath}
+          </span>
+        )}
         <span className="stat-chip">ภาษา: {analysis.language.toUpperCase()}</span>
         <span className="stat-chip">{analysis.stats.totalLines} บรรทัด</span>
         <span className="stat-chip">{analysis.stats.functionCount} ฟังก์ชัน</span>
